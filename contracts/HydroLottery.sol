@@ -671,7 +671,7 @@ interface IHydroSwapLottery {
   function closeLottery(uint256 _lotteryId) external;
 
   /**
-   * @notice Draw the final number, calculate reward in CAKE per group, and make lottery claimable
+   * @notice Draw the final number, calculate reward in HYDRO per group, and make lottery claimable
    * @param _lotteryId: lottery id
    * @param _autoInjection: reinjects funds into next lottery (vs. withdrawing all)
    * @dev Callable by operator
@@ -684,7 +684,7 @@ interface IHydroSwapLottery {
   /**
    * @notice Inject funds
    * @param _lotteryId: lottery id
-   * @param _amount: amount to inject in CAKE token
+   * @param _amount: amount to inject in HYDRO token
    * @dev Callable by operator
    */
   function injectFunds(uint256 _lotteryId, uint256 _amount) external;
@@ -693,14 +693,14 @@ interface IHydroSwapLottery {
    * @notice Start the lottery
    * @dev Callable by operator
    * @param _endTime: endTime of the lottery
-   * @param _priceTicketInCake: price of a ticket in CAKE
+   * @param _priceTicketInhydro: price of a ticket in HYDRO
    * @param _discountDivisor: the divisor to calculate the discount magnitude for bulks
    * @param _rewardsBreakdown: breakdown of rewards per bracket (must sum to 10,000)
    * @param _treasuryFee: treasury fee (10,000 = 100%, 100 = 1%)
    */
   function startLottery(
     uint256 _endTime,
-    uint256 _priceTicketInCake,
+    uint256 _priceTicketInhydro,
     uint256 _discountDivisor,
     uint256[6] calldata _rewardsBreakdown,
     uint256 _treasuryFee
@@ -733,8 +733,8 @@ contract HydroSwapLottery is ReentrancyGuard, IHydroSwapLottery, Ownable {
 
   uint256 public maxNumberTicketsPerBuyOrClaim = 100;
 
-  uint256 public maxPriceTicketInCake = 50 ether;
-  uint256 public minPriceTicketInCake = 0.005 ether;
+  uint256 public maxPriceTicketInhydro = 50 ether;
+  uint256 public minPriceTicketInhydro = 0.005 ether;
 
   uint256 public pendingInjectionNextLottery;
 
@@ -743,7 +743,7 @@ contract HydroSwapLottery is ReentrancyGuard, IHydroSwapLottery, Ownable {
   uint256 public constant MAX_LENGTH_LOTTERY = 4 days + 5 minutes; // 4 days
   uint256 public constant MAX_TREASURY_FEE = 3000; // 30%
 
-  IERC20 public cakeToken;
+  IERC20 public hydroToken;
   IRandomNumberGenerator public randomGenerator;
 
   enum Status {
@@ -757,15 +757,15 @@ contract HydroSwapLottery is ReentrancyGuard, IHydroSwapLottery, Ownable {
     Status status;
     uint256 startTime;
     uint256 endTime;
-    uint256 priceTicketInCake;
+    uint256 priceTicketInhydro;
     uint256 discountDivisor;
     uint256[6] rewardsBreakdown; // 0: 1 matching number // 5: 6 matching numbers
     uint256 treasuryFee; // 500: 5% // 200: 2% // 50: 0.5%
-    uint256[6] cakePerBracket;
+    uint256[6] hydroPerBracket;
     uint256[6] countWinnersPerBracket;
     uint256 firstTicketId;
     uint256 firstTicketIdNextLottery;
-    uint256 amountCollectedInCake;
+    uint256 amountCollectedInhydro;
     uint32 finalNumber;
   }
 
@@ -818,7 +818,7 @@ contract HydroSwapLottery is ReentrancyGuard, IHydroSwapLottery, Ownable {
     uint256 indexed lotteryId,
     uint256 startTime,
     uint256 endTime,
-    uint256 priceTicketInCake,
+    uint256 priceTicketInhydro,
     uint256 firstTicketId,
     uint256 injectedAmount
   );
@@ -848,11 +848,11 @@ contract HydroSwapLottery is ReentrancyGuard, IHydroSwapLottery, Ownable {
   /**
    * @notice Constructor
    * @dev RandomNumberGenerator must be deployed prior to this contract
-   * @param _cakeTokenAddress: address of the CAKE token
+   * @param _hydroTokenAddress: address of the HYDRO token
    * @param _randomGeneratorAddress: address of the RandomGenerator contract used to work with ChainLink VRF
    */
-  constructor(address _cakeTokenAddress, address _randomGeneratorAddress) {
-    cakeToken = IERC20(_cakeTokenAddress);
+  constructor(address _hydroTokenAddress, address _randomGeneratorAddress) {
+    hydroToken = IERC20(_hydroTokenAddress);
     randomGenerator = IRandomNumberGenerator(_randomGeneratorAddress);
 
     // Initializes a mapping
@@ -891,22 +891,22 @@ contract HydroSwapLottery is ReentrancyGuard, IHydroSwapLottery, Ownable {
       "Lottery is over"
     );
 
-    // Calculate number of CAKE to this contract
-    uint256 amountCakeToTransfer = _calculateTotalPriceForBulkTickets(
+    // Calculate number of HYDRO to this contract
+    uint256 amounthydroToTransfer = _calculateTotalPriceForBulkTickets(
       _lotteries[_lotteryId].discountDivisor,
-      _lotteries[_lotteryId].priceTicketInCake,
+      _lotteries[_lotteryId].priceTicketInhydro,
       _ticketNumbers.length
     );
 
-    // Transfer cake tokens to this contract
-    cakeToken.safeTransferFrom(
+    // Transfer hydro tokens to this contract
+    hydroToken.safeTransferFrom(
       address(msg.sender),
       address(this),
-      amountCakeToTransfer
+      amounthydroToTransfer
     );
 
     // Increment the total amount collected for the lottery round
-    _lotteries[_lotteryId].amountCollectedInCake += amountCakeToTransfer;
+    _lotteries[_lotteryId].amountCollectedInhydro += amounthydroToTransfer;
 
     for (uint256 i = 0; i < _ticketNumbers.length; i++) {
       uint32 thisTicketNumber = _ticketNumbers[i];
@@ -966,8 +966,8 @@ contract HydroSwapLottery is ReentrancyGuard, IHydroSwapLottery, Ownable {
       "Lottery not claimable"
     );
 
-    // Initializes the rewardInCakeToTransfer
-    uint256 rewardInCakeToTransfer;
+    // Initializes the rewardInhydroToTransfer
+    uint256 rewardInhydroToTransfer;
 
     for (uint256 i = 0; i < _ticketIds.length; i++) {
       require(_brackets[i] < 6, "Bracket out of range"); // Must be between 0 and 5
@@ -1008,15 +1008,15 @@ contract HydroSwapLottery is ReentrancyGuard, IHydroSwapLottery, Ownable {
       }
 
       // Increment the reward to transfer
-      rewardInCakeToTransfer += rewardForTicketId;
+      rewardInhydroToTransfer += rewardForTicketId;
     }
 
     // Transfer money to msg.sender
-    cakeToken.safeTransfer(msg.sender, rewardInCakeToTransfer);
+    hydroToken.safeTransfer(msg.sender, rewardInhydroToTransfer);
 
     emit TicketsClaim(
       msg.sender,
-      rewardInCakeToTransfer,
+      rewardInhydroToTransfer,
       _lotteryId,
       _ticketIds.length
     );
@@ -1051,7 +1051,7 @@ contract HydroSwapLottery is ReentrancyGuard, IHydroSwapLottery, Ownable {
   }
 
   /**
-   * @notice Draw the final number, calculate reward in CAKE per group, and make lottery claimable
+   * @notice Draw the final number, calculate reward in HYDRO per group, and make lottery claimable
    * @param _lotteryId: lottery id
    * @param _autoInjection: reinjects funds into next lottery (vs. withdrawing all)
    * @dev Callable by operator
@@ -1074,14 +1074,14 @@ contract HydroSwapLottery is ReentrancyGuard, IHydroSwapLottery, Ownable {
 
     // Calculate the amount to share post-treasury fee
     uint256 amountToShareToWinners = (
-      ((_lotteries[_lotteryId].amountCollectedInCake) *
+      ((_lotteries[_lotteryId].amountCollectedInhydro) *
         (10000 - _lotteries[_lotteryId].treasuryFee))
     ) / 10000;
 
     // Initializes the amount to withdraw to treasury
     uint256 amountToWithdrawToTreasury;
 
-    // Calculate prizes in CAKE for each bracket by starting from the highest one
+    // Calculate prizes in HYDRO for each bracket by starting from the highest one
     for (uint32 i = 0; i < 6; i++) {
       uint32 j = 5 - i;
       uint32 transformedWinningNumber = _bracketCalculator[j] +
@@ -1098,7 +1098,7 @@ contract HydroSwapLottery is ReentrancyGuard, IHydroSwapLottery, Ownable {
       ) {
         // B. If rewards at this bracket are > 0, calculate, else, report the numberAddresses from previous bracket
         if (_lotteries[_lotteryId].rewardsBreakdown[j] != 0) {
-          _lotteries[_lotteryId].cakePerBracket[j] =
+          _lotteries[_lotteryId].hydroPerBracket[j] =
             ((_lotteries[_lotteryId].rewardsBreakdown[j] *
               amountToShareToWinners) /
               (_numberTicketsPerLotteryId[_lotteryId][
@@ -1111,9 +1111,9 @@ contract HydroSwapLottery is ReentrancyGuard, IHydroSwapLottery, Ownable {
             _lotteryId
           ][transformedWinningNumber];
         }
-        // A. No CAKE to distribute, they are added to the amount to withdraw to treasury address
+        // A. No HYDRO to distribute, they are added to the amount to withdraw to treasury address
       } else {
-        _lotteries[_lotteryId].cakePerBracket[j] = 0;
+        _lotteries[_lotteryId].hydroPerBracket[j] = 0;
 
         amountToWithdrawToTreasury +=
           (_lotteries[_lotteryId].rewardsBreakdown[j] *
@@ -1132,10 +1132,10 @@ contract HydroSwapLottery is ReentrancyGuard, IHydroSwapLottery, Ownable {
     }
 
     amountToWithdrawToTreasury += (_lotteries[_lotteryId]
-      .amountCollectedInCake - amountToShareToWinners);
+      .amountCollectedInhydro - amountToShareToWinners);
 
-    // Transfer CAKE to treasury address
-    cakeToken.safeTransfer(treasuryAddress, amountToWithdrawToTreasury);
+    // Transfer HYDRO to treasury address
+    hydroToken.safeTransfer(treasuryAddress, amountToWithdrawToTreasury);
 
     emit LotteryNumberDrawn(
       currentLotteryId,
@@ -1176,7 +1176,7 @@ contract HydroSwapLottery is ReentrancyGuard, IHydroSwapLottery, Ownable {
   /**
    * @notice Inject funds
    * @param _lotteryId: lottery id
-   * @param _amount: amount to inject in CAKE token
+   * @param _amount: amount to inject in HYDRO token
    * @dev Callable by owner or injector address
    */
   function injectFunds(uint256 _lotteryId, uint256 _amount)
@@ -1186,8 +1186,8 @@ contract HydroSwapLottery is ReentrancyGuard, IHydroSwapLottery, Ownable {
   {
     require(_lotteries[_lotteryId].status == Status.Open, "Lottery not open");
 
-    cakeToken.safeTransferFrom(address(msg.sender), address(this), _amount);
-    _lotteries[_lotteryId].amountCollectedInCake += _amount;
+    hydroToken.safeTransferFrom(address(msg.sender), address(this), _amount);
+    _lotteries[_lotteryId].amountCollectedInhydro += _amount;
 
     emit LotteryInjection(_lotteryId, _amount);
   }
@@ -1196,14 +1196,14 @@ contract HydroSwapLottery is ReentrancyGuard, IHydroSwapLottery, Ownable {
    * @notice Start the lottery
    * @dev Callable by operator
    * @param _endTime: endTime of the lottery
-   * @param _priceTicketInCake: price of a ticket in CAKE
+   * @param _priceTicketInhydro: price of a ticket in HYDRO
    * @param _discountDivisor: the divisor to calculate the discount magnitude for bulks
    * @param _rewardsBreakdown: breakdown of rewards per bracket (must sum to 10,000)
    * @param _treasuryFee: treasury fee (10,000 = 100%, 100 = 1%)
    */
   function startLottery(
     uint256 _endTime,
-    uint256 _priceTicketInCake,
+    uint256 _priceTicketInhydro,
     uint256 _discountDivisor,
     uint256[6] calldata _rewardsBreakdown,
     uint256 _treasuryFee
@@ -1221,8 +1221,8 @@ contract HydroSwapLottery is ReentrancyGuard, IHydroSwapLottery, Ownable {
     );
 
     require(
-      (_priceTicketInCake >= minPriceTicketInCake) &&
-        (_priceTicketInCake <= maxPriceTicketInCake),
+      (_priceTicketInhydro >= minPriceTicketInhydro) &&
+        (_priceTicketInhydro <= maxPriceTicketInhydro),
       "Outside of limits"
     );
 
@@ -1248,11 +1248,11 @@ contract HydroSwapLottery is ReentrancyGuard, IHydroSwapLottery, Ownable {
       status: Status.Open,
       startTime: block.timestamp,
       endTime: _endTime,
-      priceTicketInCake: _priceTicketInCake,
+      priceTicketInhydro: _priceTicketInhydro,
       discountDivisor: _discountDivisor,
       rewardsBreakdown: _rewardsBreakdown,
       treasuryFee: _treasuryFee,
-      cakePerBracket: [
+      hydroPerBracket: [
         uint256(0),
         uint256(0),
         uint256(0),
@@ -1270,7 +1270,7 @@ contract HydroSwapLottery is ReentrancyGuard, IHydroSwapLottery, Ownable {
       ],
       firstTicketId: currentTicketId,
       firstTicketIdNextLottery: currentTicketId,
-      amountCollectedInCake: pendingInjectionNextLottery,
+      amountCollectedInhydro: pendingInjectionNextLottery,
       finalNumber: 0
     });
 
@@ -1278,7 +1278,7 @@ contract HydroSwapLottery is ReentrancyGuard, IHydroSwapLottery, Ownable {
       currentLotteryId,
       block.timestamp,
       _endTime,
-      _priceTicketInCake,
+      _priceTicketInhydro,
       currentTicketId,
       pendingInjectionNextLottery
     );
@@ -1296,7 +1296,7 @@ contract HydroSwapLottery is ReentrancyGuard, IHydroSwapLottery, Ownable {
     external
     onlyOwner
   {
-    require(_tokenAddress != address(cakeToken), "Cannot be CAKE token");
+    require(_tokenAddress != address(hydroToken), "Cannot be HYDRO token");
 
     IERC20(_tokenAddress).safeTransfer(address(msg.sender), _tokenAmount);
 
@@ -1304,22 +1304,22 @@ contract HydroSwapLottery is ReentrancyGuard, IHydroSwapLottery, Ownable {
   }
 
   /**
-   * @notice Set CAKE price ticket upper/lower limit
+   * @notice Set HYDRO price ticket upper/lower limit
    * @dev Only callable by owner
-   * @param _minPriceTicketInCake: minimum price of a ticket in CAKE
-   * @param _maxPriceTicketInCake: maximum price of a ticket in CAKE
+   * @param _minPriceTicketInhydro: minimum price of a ticket in HYDRO
+   * @param _maxPriceTicketInhydro: maximum price of a ticket in HYDRO
    */
-  function setMinAndMaxTicketPriceInCake(
-    uint256 _minPriceTicketInCake,
-    uint256 _maxPriceTicketInCake
+  function setMinAndMaxTicketPriceInhydro(
+    uint256 _minPriceTicketInhydro,
+    uint256 _maxPriceTicketInhydro
   ) external onlyOwner {
     require(
-      _minPriceTicketInCake <= _maxPriceTicketInCake,
+      _minPriceTicketInhydro <= _maxPriceTicketInhydro,
       "minPrice must be < maxPrice"
     );
 
-    minPriceTicketInCake = _minPriceTicketInCake;
-    maxPriceTicketInCake = _maxPriceTicketInCake;
+    minPriceTicketInhydro = _minPriceTicketInhydro;
+    maxPriceTicketInhydro = _maxPriceTicketInhydro;
   }
 
   /**
@@ -1364,7 +1364,7 @@ contract HydroSwapLottery is ReentrancyGuard, IHydroSwapLottery, Ownable {
   /**
    * @notice Calculate price of a set of tickets
    * @param _discountDivisor: divisor for the discount
-   * @param _priceTicket price of a ticket (in CAKE)
+   * @param _priceTicket price of a ticket (in HYDRO)
    * @param _numberTickets number of tickets to buy
    */
   function calculateTotalPriceForBulkTickets(
@@ -1537,7 +1537,7 @@ contract HydroSwapLottery is ReentrancyGuard, IHydroSwapLottery, Ownable {
 
     // Confirm that the two transformed numbers are the same, if not throw
     if (transformedWinningNumber == transformedUserNumber) {
-      return _lotteries[_lotteryId].cakePerBracket[_bracket];
+      return _lotteries[_lotteryId].hydroPerBracket[_bracket];
     } else {
       return 0;
     }
